@@ -1,9 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Common;
 
 namespace Broker
@@ -18,12 +15,27 @@ namespace Broker
             _connections = new List<ConnectionInfo>();
             _locker = new object();
         }
-
-        public static void AddConnection(ConnectionInfo connection)
+        public static void AddOrUpdateConnection(ConnectionInfo connection)
         {
             lock (_locker)
             {
-                _connections.Add(connection);
+                var existing = _connections.FirstOrDefault(c => c.Address == connection.Address);
+                if (existing == null)
+                {
+                    _connections.Add(connection);
+                }
+                else
+                {
+                    existing.Socket = connection.Socket ?? existing.Socket;
+
+                    if (connection.Topics != null)
+                    {
+                        foreach (var t in connection.Topics)
+                        {
+                            existing.Topics.Add(t);
+                        }
+                    }
+                }
             }
         }
 
@@ -31,20 +43,32 @@ namespace Broker
         {
             lock (_locker)
             {
-                _connections.RemoveAll(x => x.Address == address);
+                var c = _connections.FirstOrDefault(x => x.Address == address);
+                if (c != null)
+                    _connections.Remove(c);
             }
         }
 
         public static List<ConnectionInfo> GetConnectionsByTopic(string topic)
         {
+            if (string.IsNullOrEmpty(topic))
+                return new List<ConnectionInfo>();
+
             List<ConnectionInfo> selectedConnections;
             lock (_locker)
             {
-                selectedConnections = _connections.Where(x => x.Topic.ToString() == topic).ToList();
+                selectedConnections = _connections
+                    .Where(x => x.Topics != null && x.Topics.Contains(topic))
+                    .ToList();
             }
-
             return selectedConnections;
         }
+        public static List<ConnectionInfo> GetAll()
+        {
+            lock (_locker)
+            {
+                return _connections.ToList();
+            }
+        }
     }
-
 }

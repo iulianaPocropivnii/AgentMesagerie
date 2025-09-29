@@ -24,7 +24,6 @@ namespace Broker
                         {
                             var payloadString = JsonConvert.SerializeObject(payload);
                             byte[] data = Encoding.UTF8.GetBytes(payloadString);
-
                             connection.Socket.Send(data);
                         }
                     }

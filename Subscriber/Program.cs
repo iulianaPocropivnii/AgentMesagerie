@@ -1,5 +1,4 @@
 ﻿using System;
-using Common;
 
 namespace Subscriber
 {
@@ -7,14 +6,26 @@ namespace Subscriber
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Subscriber is running............");
-            string topic;
-            Console.WriteLine("Enter the topic you want to subscribe to: ");
-            topic = Console.ReadLine().ToLower();
-            var subscriberSocket = new SubscriberSocket(topic);
-            subscriberSocket.Connect(Settings.BROKER_IP, Settings.BROKIER_PORT);
-            Console.WriteLine("Press Enter to exit...");
-            Console.ReadLine();
+            Console.WriteLine("Subscriber is running...");
+            var subscriberSocket = new SubscriberSocket();
+            subscriberSocket.Connect(Common.Settings.BROKER_IP, Common.Settings.BROKIER_PORT);
+
+            Console.WriteLine("Enter comma-separated topics or press 'q' to exit::");
+            while (true)
+            {
+                Console.Write("> ");
+                var line = Console.ReadLine();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line.Trim().ToLower() == "q") break;
+
+                var topics = line.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var topic in topics)
+                {
+                    subscriberSocket.Subscribe(topic.ToLower());
+                }
+            }
+
+            subscriberSocket.Close();
         }
     }
 }

@@ -9,60 +9,42 @@ namespace Subscriber
     internal class SubscriberSocket
     {
         private Socket _socket;
-        private readonly string _topic;
         private readonly byte[] _buffer;
 
-        public SubscriberSocket(string topic)
+        public SubscriberSocket()
         {
-            _topic = topic;
             _buffer = new byte[ConnectionInfo.BUFFER_SIZE];
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         }
 
-        public void Connect(string ipAddress, int port)
+        public void Connect(string ip, int port)
         {
             try
             {
-                _socket.BeginConnect(new IPEndPoint(IPAddress.Parse(ipAddress), port), ConnectedCallback, null);
-                Console.WriteLine("Connecting to the server.........");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error connecting to server: " + ex.Message);
-            }
-        }
-
-        private void ConnectedCallback(IAsyncResult ar)
-        {
-            try
-            {
-                _socket.EndConnect(ar);
-
+                _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                _socket.Connect(IPAddress.Parse(ip), port);
                 if (_socket.Connected)
-                {
-                    Console.WriteLine("Subscriber connected to broker.");
-                    Subscribe();
-                    StartReceive();
-                }
-                else
-                {
-                    Console.WriteLine("Failed to connect to broker.");
-                }
+                    Console.WriteLine("Connected to the server.");
+                StartReceive();
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error during connection callback: " + ex.Message);
+                Console.WriteLine("Connection error: " + ex.Message);
             }
         }
-
-        private void Subscribe()
+        public void Subscribe(string topic)
         {
             try
             {
-                string subscribeMessage = "subscribe#" + _topic;
+                if (_socket == null || !_socket.Connected)
+                {
+                    Console.WriteLine("Socket not connected.");
+                    return;
+                }
+
+                var subscribeMessage = "subscribe#" + topic;
                 byte[] data = Encoding.UTF8.GetBytes(subscribeMessage);
                 _socket.Send(data);
-                Console.WriteLine($"Subscribed to topic: {_topic}");
+                Console.WriteLine($"Subscribed to topic: {topic}");
             }
             catch (Exception ex)
             {
@@ -86,36 +68,27 @@ namespace Subscriber
         {
             try
             {
-                if (_socket == null || !_socket.Connected)
-                    return;
-
-                SocketError error;
-                int received = _socket.EndReceive(ar, out error);
-
-                if (received > 0 && error == SocketError.Success)
+                int bytesRead = _socket.EndReceive(ar);
+                if (bytesRead > 0)
                 {
-                    byte[] payloadBytes = new byte[received];
-                    Array.Copy(_buffer, payloadBytes, received);
-
-                    PayloadHandler.Handle(payloadBytes);
-
-                    // Continue receiving
-                    _socket.BeginReceive(_buffer, 0, _buffer.Length, SocketFlags.None, ReceiveCallback, null);
+                    var payloadString = Encoding.UTF8.GetString(_buffer, 0, bytesRead);
+                    Console.WriteLine($"Received payload: {payloadString}");
+                    StartReceive();
                 }
                 else
                 {
-                    Console.WriteLine("Disconnected from broker.");
+                    Console.WriteLine("Server closed connection.");
                     Close();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error receiving data: " + ex.Message);
+                Console.WriteLine("Receive error: " + ex.Message);
                 Close();
             }
         }
 
-        private void Close()
+        public void Close()
         {
             try
             {
