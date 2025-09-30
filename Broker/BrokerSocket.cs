@@ -1,20 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Net.Sockets;   
-using System.Threading.Tasks;
-using System.Globalization;
 using System.Net;
-using System.Data;
-using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Common;
 
 namespace Broker
 {
     class BrokerSocket
     {
-        private const int CONNECTION_LIMIT = 8; 
+        private const int CONNECTION_LIMIT = 8;
         private Socket _socket;
 
         public BrokerSocket()
@@ -22,11 +15,25 @@ namespace Broker
             _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         }
 
+        // validare IP & port + gestionare port ocupat
         public void Start(string ip, int port)
         {
-            _socket.Bind(new IPEndPoint(IPAddress.Parse(ip), port));
-            _socket.Listen(CONNECTION_LIMIT);
-            Accept();
+            if (!IPAddress.TryParse(ip, out var ipAddress))
+                throw new ArgumentException("IP invalid");
+            if (port <= 0 || port > 65535)
+                throw new ArgumentOutOfRangeException(nameof(port), "Port invalid");
+
+            try
+            {
+                _socket.Bind(new IPEndPoint(ipAddress, port));
+                _socket.Listen(CONNECTION_LIMIT);
+                Accept();
+            }
+            catch (SocketException se)
+            {
+                Console.WriteLine("Socket error on bind/listen: " + se.Message);
+                throw;
+            }
         }
 
         private void Accept()
@@ -40,61 +47,112 @@ namespace Broker
             try
             {
                 connection.Socket = _socket.EndAccept(ar);
-                connection.Address = connection.Socket.RemoteEndPoint.ToString();
-                connection.Socket.BeginReceive(connection.Data, 0, ConnectionInfo.BUFFER_SIZE, SocketFlags.None, ReciveCallback, connection);
+                connection.Address = connection.Socket?.RemoteEndPoint?.ToString() ?? "Unknown";
+
+                connection.Socket.BeginReceive(
+                    connection.Data, 0, ConnectionInfo.BUFFER_SIZE,
+                    SocketFlags.None, ReciveCallback, connection
+                );
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Error accepting connection: " + ex.Message);
-                Console.ReadLine();
             }
             finally
             {
-                Accept();
+                Accept(); 
             }
         }
 
         private void ReciveCallback(IAsyncResult ar)
         {
             ConnectionInfo connection = ar.AsyncState as ConnectionInfo;
+            if (connection?.Socket == null) return;
+
             try
             {
                 Socket senderSocket = connection.Socket;
                 SocketError response;
                 int bufferSize = senderSocket.EndReceive(ar, out response);
 
-                if (response == SocketError.Success)
+                // verificare dacă clientul s-a deconectat sau a apărut o eroare
+                if (bufferSize == 0 || response != SocketError.Success)
                 {
-                    byte[] payload = new byte[bufferSize];
-                    Array.Copy(connection.Data, payload, bufferSize);
+                    Console.WriteLine($"Client disconnected: {connection.Address}");
+                    ConnectionsStorage.RemoveConnection(connection.Address);
 
-                    PayloadHandler.Handle(payload, connection);
+                    try
+                    {
+                        if (connection.Socket.Connected)
+                            connection.Socket.Shutdown(SocketShutdown.Both);
+                    }
+                    catch
+                    {
+                        // Socketul poate fi deja închis
+                    }
+
+                    connection.Socket.Close();
+                    connection.Socket = null;
+                    return;
                 }
 
+                // procesăm payload doar dacă avem date valide
+                byte[] payload = new byte[bufferSize];
+                Array.Copy(connection.Data, payload, bufferSize);
+
+                PayloadHandler.Handle(payload, connection);
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Error receiving data: " + ex.Message);
-                Console.ReadLine();
+
+                try
+                {
+                    var address = connection.Socket?.RemoteEndPoint?.ToString();
+                    if (!string.IsNullOrEmpty(address))
+                    {
+                        ConnectionsStorage.RemoveConnection(address);
+                        Console.WriteLine($"Connection removed: {address}");
+                    }
+
+                    if (connection.Socket != null)
+                    {
+                        if (connection.Socket.Connected)
+                            connection.Socket.Shutdown(SocketShutdown.Both);
+
+                        connection.Socket.Close();
+                        connection.Socket = null;
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    Console.WriteLine("Error during cleanup: " + cleanupEx.Message);
+                }
             }
             finally
             {
-                //on disconect method, 
                 try
                 {
-                    connection.Socket.BeginReceive(connection.Data, 0, connection.Data.Length, SocketFlags.None, ReciveCallback, connection);
+                    if (connection.Socket != null && connection.Socket.Connected)
+                    {
+                        connection.Socket.BeginReceive(
+                            connection.Data, 0, connection.Data.Length,
+                            SocketFlags.None, ReciveCallback, connection
+                        );
+                    }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine("Error re-initiating receive: " + ex.Message);
-                    var address = connection.Socket.RemoteEndPoint.ToString();
-                    
-                    ConnectionsStorage.RemoveConnection(address);
-                    connection.Socket.Close();
-                    Console.ReadLine();
+                    var address = connection.Socket?.RemoteEndPoint?.ToString();
+
+                    if (!string.IsNullOrEmpty(address))
+                        ConnectionsStorage.RemoveConnection(address);
+
+                    connection.Socket?.Close();
+                    connection.Socket = null;
                 }
             }
         }
-
     }
 }
