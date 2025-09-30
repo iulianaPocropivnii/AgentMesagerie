@@ -19,9 +19,26 @@ namespace Publisher
 
         public void Connect(string ipAddress, int port)
         {
-            _socket.BeginConnect(new IPEndPoint(IPAddress.Parse(ipAddress), port), ConnectedCallback, null);
-            Thread.Sleep(2000); 
+            try
+            {
+                var result = _socket.BeginConnect(new IPEndPoint(IPAddress.Parse(ipAddress), port), null, null);
+                bool success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(5), true);
 
+                if (!success || !_socket.Connected)
+                {
+                    Console.WriteLine("Failed to connect to broker (timeout).");
+                    IsConnected = false;
+                    return;
+                }
+
+                Console.WriteLine("Connected to the broker.");
+                IsConnected = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Connection error: " + ex.Message);
+                IsConnected = false;
+            }
         }
 
         public void Send(byte[] data)
@@ -37,18 +54,5 @@ namespace Publisher
             }
         }
 
-        private void ConnectedCallback(IAsyncResult ar)
-        {
-            if(_socket.Connected)
-            {
-                Console.WriteLine("Connected to the server.");
-            }
-            else
-            {
-                Console.WriteLine("Failed to connect to the server.");
-            }
-
-            IsConnected = _socket.Connected;
-        }
     }
 }
